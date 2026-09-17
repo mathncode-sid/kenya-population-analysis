@@ -6,6 +6,5 @@ __pycache__/
 # Downloaded GeoTIFF cache and generated outputs
 data/raw/*.tif
 data/raw/*.part
-data/processed/*.csv
 data/processed/validation_log.txt
 outputs/figures/*.html
