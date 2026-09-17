@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.pipeline import calculate_indicators, configure_raster_environment, parse_raster_filename
+from src.pipeline import calculate_indicators, configure_raster_environment, load_boundaries, parse_raster_filename
 
 
 def test_configure_raster_environment_uses_bundled_data(monkeypatch):
@@ -16,6 +16,13 @@ def test_configure_raster_environment_uses_bundled_data(monkeypatch):
     for key in ("PROJ_DATA", "PROJ_LIB", "GDAL_DATA"):
         assert key in os.environ
         assert Path(os.environ[key]).exists()
+
+
+def test_load_boundaries_returns_kenya_counties():
+    counties = load_boundaries()
+    assert len(counties) == 47
+    assert "county" in counties.columns
+    assert counties["county"].nunique() == 47
 
 
 def test_parse_worldpop_filename():
