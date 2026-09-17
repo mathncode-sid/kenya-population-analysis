@@ -123,16 +123,26 @@ def download_data(discovered, session=None):
     return local_files
 
 def load_boundaries():
-    """Load and validate Kenya GADM level-2 boundaries."""
+    """Load and validate Kenya county boundaries, dissolving constituency rows into 47 counties."""
     if not GADM_PATH.exists():
         raise FileNotFoundError(f"Missing boundary file: {GADM_PATH}")
     gdf = gpd.read_file(GADM_PATH)
-    if len(gdf) != 47:
-        LOGGER.warning("Expected 47 counties, found %d", len(gdf))
-    if gdf.crs is None:
+    if "NAME_1" in gdf.columns:
+        counties = gdf.dissolve(by="NAME_1", as_index=False)[["NAME_1", "geometry"]].rename(columns={"NAME_1": "county"})
+    elif "NAME_2" in gdf.columns:
+        counties = gdf.dissolve(by="NAME_2", as_index=False)[["NAME_2", "geometry"]].rename(columns={"NAME_2": "county"})
+    else:
+        counties = gdf.copy()
+        if "county" not in counties.columns:
+            raise ValueError("Boundary file does not contain a usable county column")
+        counties = counties[["county", "geometry"]].copy()
+
+    if len(counties) != 47:
+        LOGGER.warning("Expected 47 counties, found %d", len(counties))
+    if counties.crs is None:
         raise ValueError("Boundary file has no CRS")
-    LOGGER.info("Boundary CRS: %s; counties: %d", gdf.crs, len(gdf))
-    return gdf
+    LOGGER.info("Boundary CRS: %s; counties: %d", counties.crs, len(counties))
+    return counties
 
 def aggregate_rasters(local_files, boundaries):
     """Aggregate every available age-sex raster to each county."""
@@ -148,11 +158,11 @@ def aggregate_rasters(local_files, boundaries):
             raise ValueError(f"Raster has no CRS: {sample_path}")
         LOGGER.info("%s raster CRS: %s", year, raster_crs)
         year_boundaries = boundaries.to_crs(raster_crs)
-        county_data = year_boundaries[["NAME_2", "geometry"]].copy()
-        county_data = county_data.rename(columns={"NAME_2": "county"})
+        county_data = year_boundaries[["county", "geometry"]].copy()
         county_data["year"] = year
 
         for (sex, age), filepath in sorted(files.items()):
+            LOGGER.info("Aggregating %s %s-%d to counties", year, sex, age)
             with rasterio.open(filepath) as raster:
                 values = zonal_stats(
                     county_data.geometry,
@@ -204,10 +214,10 @@ def generate_figures(df, boundaries, local_files):
     country_totals = df.groupby("year", as_index=False)["total_population"].sum()
     px.line(country_totals, x="year", y="total_population", markers=True,
         title="Kenya Total Population, 2021-2025").write_html(FIGURES_DIR / "population_timeseries.html")
-    county_sizes = boundaries.to_crs("EPSG:6933")[ ["NAME_2", "geometry"] ].copy()
+    county_sizes = boundaries.to_crs("EPSG:6933")[["county", "geometry"]].copy()
     county_sizes["county_size_km2"] = county_sizes.geometry.area / 1_000_000
     latest = df[df["year"] == df["year"].max()].merge(
-        county_sizes.drop(columns="geometry"), left_on="county", right_on="NAME_2", how="left"
+        county_sizes.drop(columns="geometry"), on="county", how="left"
     )
     px.scatter(latest, x="county_size_km2", y="children_under_5", hover_name="county",
                title="Children Under 5 vs County Size").write_html(FIGURES_DIR / "children_vs_county_size.html")
