@@ -1,11 +1,18 @@
 """Streamlit dashboard for Kenya county population indicators."""
 
+import sys
 from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
 import geopandas as gpd
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
+from src.pipeline import load_boundaries
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = PROJECT_DIR / "data" / "processed" / "kenya_population_by_county.csv"
@@ -24,23 +31,29 @@ INDICATORS = {
 
 @st.cache_data
 def load_data():
-    """Load the processed county data and GADM boundaries."""
+    """Load the processed county data and county boundaries."""
     if not DATA_PATH.exists():
         raise FileNotFoundError("Run the pipeline first to create the processed CSV.")
-    return pd.read_csv(DATA_PATH), gpd.read_file(BOUNDARY_PATH)
+    return pd.read_csv(DATA_PATH), load_boundaries()
 
 
 def build_age_pyramid(data, counties, sex_filter):
     """Create an age distribution chart for the selected counties."""
-    selected = data[data["county"].isin(counties)]
+    selected = data[data["county"].isin(counties)].copy()
     age_columns = [column for column in data.columns if column.startswith(("f_", "m_"))]
     rows = []
+    target_sex = None if sex_filter == "Total" else {"Male": "m", "Female": "f"}[sex_filter]
+
     for column in age_columns:
-        sex, age = column.split("_")
-        if sex_filter != "Total" and sex != sex_filter:
+        sex, age = column.split("_", 1)
+        if target_sex is not None and sex != target_sex:
             continue
         rows.append({"age": int(age), "sex": sex.upper(), "population": selected[column].sum()})
+
     age_data = pd.DataFrame(rows)
+    if age_data.empty:
+        age_data = pd.DataFrame({"age": [0], "sex": ["M"], "population": [0]})
+
     return px.bar(age_data, x="population", y="age", color="sex", orientation="h",
                   barmode="group", title="Population by age group")
 
@@ -79,7 +92,7 @@ metric_columns[2].metric("Children under 5", f"{children:,.0f}")
 metric_columns[3].metric("Elderly 65+", f"{elderly:,.0f}")
 metric_columns[4].metric("Sex ratio", f"{sex_ratio:.1f}")
 
-map_data = boundaries.merge(year_data, left_on="NAME_2", right_on="county", how="left")
+map_data = boundaries.merge(year_data, on="county", how="left")
 map_data["display_value"] = map_data[indicator]
 map_data["hover_text"] = map_data.apply(
     lambda row: f"{row['county']}<br>Population: {row['total_population']:,.0f}<br>Dependency ratio: {row['dependency_ratio']:.1f}",
