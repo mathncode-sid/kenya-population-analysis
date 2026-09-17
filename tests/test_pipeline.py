@@ -1,6 +1,21 @@
+import os
+from pathlib import Path
+
 import pandas as pd
 
-from src.pipeline import calculate_indicators, parse_raster_filename
+from src.pipeline import calculate_indicators, configure_raster_environment, parse_raster_filename
+
+
+def test_configure_raster_environment_uses_bundled_data(monkeypatch):
+    monkeypatch.delenv("PROJ_DATA", raising=False)
+    monkeypatch.delenv("PROJ_LIB", raising=False)
+    monkeypatch.delenv("GDAL_DATA", raising=False)
+
+    configure_raster_environment()
+
+    for key in ("PROJ_DATA", "PROJ_LIB", "GDAL_DATA"):
+        assert key in os.environ
+        assert Path(os.environ[key]).exists()
 
 
 def test_parse_worldpop_filename():
