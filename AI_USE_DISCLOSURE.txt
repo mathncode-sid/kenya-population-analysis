@@ -1,0 +1,16 @@
+Tools used: GitHub Copilot.
+
+Use:
+- Helped inspect the repository and assessment requirements.
+- Helped identify the correct WorldPop directory structure and debug the failed 2020 URL pattern.
+- Helped implement and review pipeline validation, spatial aggregation, dashboard filters, and documentation.
+
+Validation:
+- The generated code was reviewed against the assessment requirements.
+- The Python pipeline and Streamlit dashboard were compiled with py_compile.
+- Focused unit tests cover filename parsing and indicator calculations.
+
+Prompts submitted:
+- "I installed the packages but they are not reflecting in my code"
+- "How many files should the pipeline download?"
+- "Project should follow this criteria, please verify against these requirements"
