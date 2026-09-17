@@ -1,9 +1,31 @@
 """Download, validate, aggregate, and summarize WorldPop Kenya rasters."""
 
+import importlib.util
 import logging
 import os
 import re
 from pathlib import Path
+
+
+def configure_raster_environment():
+    """Force rasterio to use its bundled PROJ/GDAL data instead of external system installs."""
+    rasterio_spec = importlib.util.find_spec("rasterio")
+    if rasterio_spec is None or rasterio_spec.origin is None:
+        return
+
+    rasterio_root = Path(rasterio_spec.origin).resolve().parent
+    for key, relative_path in {
+        "PROJ_DATA": "proj_data",
+        "PROJ_LIB": "proj_data",
+        "GDAL_DATA": "gdal_data",
+    }.items():
+        candidate = rasterio_root / relative_path
+        if candidate.exists():
+            os.environ[key] = str(candidate)
+
+
+configure_raster_environment()
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
