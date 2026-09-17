@@ -1,0 +1,7 @@
+﻿pandas
+geopandas
+rasterio
+rasterstats
+requests
+streamlit
+plotly
