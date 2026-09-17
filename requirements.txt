@@ -5,3 +5,4 @@ rasterstats
 requests
 streamlit
 plotly
+pytest
