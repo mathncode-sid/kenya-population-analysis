@@ -1,79 +1,120 @@
-import streamlit as st
-import pandas as pd
-import geopandas as gpd
-import plotly.express as px
-import os
+"""Streamlit dashboard for Kenya county population indicators."""
 
-st.set_page_config(layout="wide", page_title="Kenya Demographics Dashboard")
+from pathlib import Path
+
+import geopandas as gpd
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+DATA_PATH = PROJECT_DIR / "data" / "processed" / "kenya_population_by_county.csv"
+BOUNDARY_PATH = PROJECT_DIR / "data" / "raw" / "gadm41_KEN_2.json"
+
+INDICATORS = {
+    "Total Population": "total_population",
+    "Children under 5": "children_under_5",
+    "Elderly 65+": "elderly_65plus",
+    "Dependency Ratio": "dependency_ratio",
+    "Sex Ratio": "sex_ratio",
+    "Child Dependency Ratio": "child_dependency_ratio",
+    "Elderly Dependency Ratio": "elderly_dependency_ratio",
+}
+
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data/processed/kenya_population_by_county.csv")
-    gdf = gpd.read_file("data/gadm41_KEN_2.json")
-    return df, gdf
+    """Load the processed county data and GADM boundaries."""
+    if not DATA_PATH.exists():
+        raise FileNotFoundError("Run the pipeline first to create the processed CSV.")
+    return pd.read_csv(DATA_PATH), gpd.read_file(BOUNDARY_PATH)
 
-df, gdf = load_data()
 
-# --- SIDEBAR FILTERS ---
+def build_age_pyramid(data, counties, sex_filter):
+    """Create an age distribution chart for the selected counties."""
+    selected = data[data["county"].isin(counties)]
+    age_columns = [column for column in data.columns if column.startswith(("f_", "m_"))]
+    rows = []
+    for column in age_columns:
+        sex, age = column.split("_")
+        if sex_filter != "Total" and sex != sex_filter:
+            continue
+        rows.append({"age": int(age), "sex": sex.upper(), "population": selected[column].sum()})
+    age_data = pd.DataFrame(rows)
+    return px.bar(age_data, x="population", y="age", color="sex", orientation="h",
+                  barmode="group", title="Population by age group")
+
+
+st.set_page_config(page_title="Kenya Population Health Dashboard", layout="wide")
+st.title("Kenya Population Health Dashboard")
+st.caption("County-level age and sex structure for public health planning")
+
+try:
+    df, boundaries = load_data()
+except FileNotFoundError as error:
+    st.error(str(error))
+    st.stop()
+
 st.sidebar.header("Filters")
-year_filter = st.sidebar.selectbox("Year", sorted(df['year'].unique()), index=4)
-indicator_filter = st.sidebar.selectbox(
-    "Indicator", 
-    ["total_population", "children_under_5", "elderly_65plus", "dependency_ratio", "sex_ratio"]
+year_filter = st.sidebar.selectbox("Year", sorted(df["year"].unique()), index=len(df["year"].unique()) - 1)
+sex_filter = st.sidebar.radio("Sex", ["Total", "Male", "Female"])
+indicator_label = st.sidebar.selectbox("Map indicator", list(INDICATORS))
+county_options = sorted(df["county"].unique())
+county_filter = st.sidebar.multiselect("Counties", county_options)
+
+year_data = df[df["year"] == year_filter].copy()
+selected_counties = county_filter or county_options
+filtered_data = year_data[year_data["county"].isin(selected_counties)].copy()
+indicator = INDICATORS[indicator_label]
+
+total_population = filtered_data["total_population"].sum()
+children = filtered_data["children_under_5"].sum()
+elderly = filtered_data["elderly_65plus"].sum()
+dependency = filtered_data["dependency_ratio"].mean()
+sex_ratio = filtered_data["sex_ratio"].mean()
+metric_columns = st.columns(5)
+metric_columns[0].metric("Population", f"{total_population:,.0f}")
+metric_columns[1].metric("Dependency ratio", f"{dependency:.1f}")
+metric_columns[2].metric("Children under 5", f"{children:,.0f}")
+metric_columns[3].metric("Elderly 65+", f"{elderly:,.0f}")
+metric_columns[4].metric("Sex ratio", f"{sex_ratio:.1f}")
+
+map_data = boundaries.merge(year_data, left_on="NAME_2", right_on="county", how="left")
+map_data["display_value"] = map_data[indicator]
+map_data["hover_text"] = map_data.apply(
+    lambda row: f"{row['county']}<br>Population: {row['total_population']:,.0f}<br>Dependency ratio: {row['dependency_ratio']:.1f}",
+    axis=1,
 )
-county_filter = st.sidebar.multiselect("Select Counties (Compare)", df['county'].unique())
-
-# Filter data
-filtered_df = df[df['year'] == year_filter]
-if county_filter:
-    filtered_df = filtered_df[filtered_df['county'].isin(county_filter)]
-
-# --- HEADER METRICS ---
-st.title(f"Kenya Population Health Indicators ({year_filter})")
-
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Population", f"{filtered_df['total_population'].sum():,.0f}")
-col2.metric("Avg Dependency Ratio", f"{filtered_df['dependency_ratio'].mean():.1f}")
-col3.metric("Total Children <5", f"{filtered_df['children_under_5'].sum():,.0f}")
-col4.metric("Total Elderly 65+", f"{filtered_df['elderly_65plus'].sum():,.0f}")
-
-# --- VISUALIZATIONS ---
-st.markdown("### Spatial Distribution")
-
-# Merge for mapping
-map_data = gdf.merge(filtered_df, left_on="NAME_2", right_on="county")
-
-# Choropleth
-fig_map = px.choropleth_mapbox(
-    map_data, 
-    geojson=map_data.geometry.__geo_interface__, 
-    locations=map_data.index, 
-    color=indicator_filter,
-    hover_name="county",
-    mapbox_style="carto-positron",
+map_figure = px.choropleth_map(
+    map_data,
+    geojson=map_data.geometry.__geo_interface__,
+    locations=map_data.index,
+    color="display_value",
+    hover_name="hover_text",
     center={"lat": 0.0236, "lon": 37.9062},
-    zoom=4.5,
-    color_continuous_scale="Viridis" if "ratio" not in indicator_filter else "RdBu"
+    zoom=4.8,
+    color_continuous_scale="RdBu" if "Ratio" in indicator_label else "Viridis",
+    labels={"display_value": indicator_label},
 )
-fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-st.plotly_chart(fig_map, use_container_width=True)
+map_figure.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+st.subheader(f"{indicator_label} by county in {year_filter}")
+st.plotly_chart(map_figure, use_container_width=True)
 
-# Layout for charts
-c1, c2 = st.columns(2)
+chart_left, chart_right = st.columns(2)
+with chart_left:
+    st.subheader("County comparison")
+    comparison = filtered_data.sort_values(indicator, ascending=False).head(10)
+    st.plotly_chart(px.bar(comparison, x="county", y=indicator, title=f"Top counties by {indicator_label}"),
+                    use_container_width=True)
+with chart_right:
+    st.subheader("Age pyramid")
+    pyramid = build_age_pyramid(year_data, selected_counties, sex_filter)
+    st.plotly_chart(pyramid, use_container_width=True)
 
-with c1:
-    st.markdown("### County Comparison")
-    # Bar chart for top/selected counties
-    plot_df = filtered_df.sort_values(indicator_filter, ascending=False).head(10)
-    fig_bar = px.bar(plot_df, x='county', y=indicator_filter, title=f"Top Counties by {indicator_filter}")
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-with c2:
-    st.markdown("### Public Health Interpretation")
-    st.info("""
-    **Understanding the Data for Policy Planning:**
-    
-    * **High Child Population (<5):** Counties highlighting deep concentrations of under-5s require prioritized funding for routine immunizations, pediatric facilities, and maternal health programs.
-    * **High Elderly Population (65+):** Indicates a shift in disease burden toward non-communicable diseases (NCDs). These regions need investment in chronic disease management and geriatric care.
-    * **Dependency Ratios:** High dependency ratios signal that the working-age population is carrying a heavy economic burden to support the youth and elderly. This directly impacts local health financing capacity and out-of-pocket expenditure vulnerability.
-    """)
+st.subheader("Public health interpretation")
+st.info(
+    "High child populations support prioritizing immunization, pediatric care, and nutrition services. "
+    "Higher elderly populations increase demand for chronic disease management and geriatric care. "
+    "A high dependency ratio means fewer working-age people support dependents, which can affect household "
+    "resources and local health-financing capacity."
+)
