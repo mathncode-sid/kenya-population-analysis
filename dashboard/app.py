@@ -76,7 +76,7 @@ county_options = sorted(df["county"].unique())
 county_filter = st.sidebar.multiselect("Counties", county_options)
 
 year_data = df[df["year"] == year_filter].copy()
-selected_counties = county_filter or county_options
+selected_counties = county_filter if county_filter else county_options
 filtered_data = year_data[year_data["county"].isin(selected_counties)].copy()
 indicator = INDICATORS[indicator_label]
 
@@ -92,7 +92,7 @@ metric_columns[2].metric("Children under 5", f"{children:,.0f}")
 metric_columns[3].metric("Elderly 65+", f"{elderly:,.0f}")
 metric_columns[4].metric("Sex ratio", f"{sex_ratio:.1f}")
 
-map_data = boundaries.merge(year_data, on="county", how="left")
+map_data = boundaries[boundaries["county"].isin(selected_counties)].merge(year_data, on="county", how="left")
 map_data["display_value"] = map_data[indicator]
 map_data["hover_text"] = map_data.apply(
     lambda row: f"{row['county']}<br>Population: {row['total_population']:,.0f}<br>Dependency ratio: {row['dependency_ratio']:.1f}",
